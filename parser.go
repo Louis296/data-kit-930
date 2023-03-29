@@ -14,6 +14,7 @@ func ParseFile(path string) (*DataSet, error) {
 	p := &Parser{
 		reader:    file,
 		byteOrder: binary.BigEndian,
+		modifyStr: true,
 	}
 	return p.parser(), nil
 }
@@ -21,6 +22,9 @@ func ParseFile(path string) (*DataSet, error) {
 type Parser struct {
 	reader    io.Reader
 	byteOrder binary.ByteOrder
+
+	// 是否移除string末尾的空字符
+	modifyStr bool
 }
 
 func (p *Parser) parser() *DataSet {
@@ -63,9 +67,11 @@ func (p *Parser) parsePublicInfo() *PublicInfo {
 	// skip magic keys
 	_, _ = p.nextString(16)
 	return &PublicInfo{
-		HeaderCRC: p.mustNextUint16(),
-		Length:    p.mustNextUint32(),
-		Type:      p.mustNextUint16(),
+		HeaderCRC:       p.mustNextUint16(),
+		Length:          p.mustNextUint32(),
+		Type:            p.mustNextUint16(),
+		SoftwareVersion: p.mustNextString(16),
+		HeaderLength:    p.mustNextUint32(),
 	}
 }
 
@@ -183,6 +189,9 @@ func (p *Parser) nextString(l int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if p.modifyStr {
+		return modifyString(res), nil
+	}
 	return string(res), nil
 }
 
@@ -236,4 +245,16 @@ func (p *Parser) mustNextString(l int) string {
 		panic(err)
 	}
 	return res
+}
+
+// modifyString 将bytes转为string，并移除末尾的空字符
+func modifyString(bs []byte) string {
+	i := len(bs) - 1
+	for i >= 0 {
+		if bs[i] != 0 {
+			break
+		}
+		i--
+	}
+	return string(bs[:i+1])
 }

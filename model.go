@@ -11,9 +11,11 @@ type DataSet struct {
 
 // PublicInfo 1.2.1 公共信息
 type PublicInfo struct {
-	HeaderCRC uint16
-	Length    uint32
-	Type      uint16
+	HeaderCRC       uint16
+	Length          uint32
+	Type            uint16
+	SoftwareVersion string
+	HeaderLength    uint32
 }
 
 // DeviceInfo 1.2.2 设备信息
