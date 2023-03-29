@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"strconv"
 )
 
 func ParseFile(path string) (*DataSet, error) {
@@ -13,8 +14,8 @@ func ParseFile(path string) (*DataSet, error) {
 	}
 	p := &Parser{
 		reader:    file,
-		byteOrder: binary.BigEndian,
-		modifyStr: true,
+		byteOrder: binary.LittleEndian,
+		modifyStr: false,
 	}
 	return p.parser(), nil
 }
@@ -28,39 +29,37 @@ type Parser struct {
 }
 
 func (p *Parser) parser() *DataSet {
-	publicInfo := p.parsePublicInfo()
-	deviceInfo := p.parseDeviceInfo()
-	var acquisitionInfo *AcquisitionInfo
-	var imageInfo *ImageInfo
-	var dataInfo *DataInfo
-	switch publicInfo.Type {
+	dataSet := &DataSet{}
+	dataSet.PublicInfo = p.parsePublicInfo()
+	dataSet.DeviceInfo = p.parseDeviceInfo()
+	switch dataSet.PublicInfo.Type {
 	case RawDataType:
-		acquisitionInfo = p.parseAcquisitionInfo()
-		dataInfo = p.parseDataInfo()
+		dataSet.AcquisitionInfo = p.parseAcquisitionInfo()
+		dataSet.DataInfo = p.parseDataInfo()
+
+		dataSet.RawData = p.parseRawData()
 	case ListmodeDataType:
-		acquisitionInfo = p.parseAcquisitionInfo()
-		dataInfo = p.parseDataInfo()
+		dataSet.AcquisitionInfo = p.parseAcquisitionInfo()
+		dataSet.DataInfo = p.parseDataInfo()
+
+		dataSet.ListmodeData = p.parseListmodeData()
 	case MichDataType:
-		acquisitionInfo = p.parseAcquisitionInfo()
-		dataInfo = p.parseDataInfo()
+		dataSet.AcquisitionInfo = p.parseAcquisitionInfo()
+		dataSet.DataInfo = p.parseDataInfo()
+
+		dataSet.MichData = p.parseMichData()
 	case EnergyCalibrationMap:
-		dataInfo = p.parseDataInfo()
+		dataSet.DataInfo = p.parseDataInfo()
 	case TimeCalibrationMap:
-		dataInfo = p.parseDataInfo()
+		dataSet.DataInfo = p.parseDataInfo()
 	case EnergySpectrumData:
-		dataInfo = p.parseDataInfo()
+		dataSet.DataInfo = p.parseDataInfo()
 	default:
-		acquisitionInfo = p.parseAcquisitionInfo()
-		imageInfo = p.parseImageInfo()
-		dataInfo = p.parseDataInfo()
+		dataSet.AcquisitionInfo = p.parseAcquisitionInfo()
+		dataSet.ImageInfo = p.parseImageInfo()
+		dataSet.DataInfo = p.parseDataInfo()
 	}
-	return &DataSet{
-		PublicInfo:      publicInfo,
-		DeviceInfo:      deviceInfo,
-		AcquisitionInfo: acquisitionInfo,
-		ImageInfo:       imageInfo,
-		DataInfo:        dataInfo,
-	}
+	return dataSet
 }
 
 func (p *Parser) parsePublicInfo() *PublicInfo {
@@ -156,6 +155,53 @@ func (p *Parser) parseDataInfo() *DataInfo {
 	}
 }
 
+func (p *Parser) parseRawData() []RawDataItem {
+	var res []RawDataItem
+	for {
+		data, err := p.nextUint8Slice(1152)
+		if err != nil {
+			break
+		}
+		res = append(res, RawDataItem{
+			Data: data,
+			IP:   toIPStr(p.mustNextUint16()),
+		})
+	}
+	return res
+}
+
+func (p *Parser) parseListmodeData() []ListmodeDataItem {
+	var res []ListmodeDataItem
+	for {
+		ip, err := p.nextUint16()
+		if err != nil {
+			break
+		}
+		ch := p.mustNextUint16()
+		res = append(res, ListmodeDataItem{
+			IP:       toIPStr(ip),
+			XTalk:    ch&(1<<15) != 0,
+			Reserved: uint8((ch >> 12) & (1<<3 - 1)),
+			Channel:  ch & (1<<12 - 1),
+			Energy:   p.mustNextFloat32(),
+			Time:     p.mustNextFloat64(),
+		})
+	}
+	return res
+}
+
+func (p *Parser) parseMichData() []uint16 {
+	var res []uint16
+	for {
+		v, err := p.nextUint16()
+		if err != nil {
+			break
+		}
+		res = append(res, v)
+	}
+	return res
+}
+
 func (p *Parser) nextUint16() (uint16, error) {
 	var res uint16
 	err := binary.Read(p.reader, p.byteOrder, &res)
@@ -183,6 +229,15 @@ func (p *Parser) nextFloat32() (float32, error) {
 	return res, nil
 }
 
+func (p *Parser) nextFloat64() (float64, error) {
+	var res float64
+	err := binary.Read(p.reader, p.byteOrder, &res)
+	if err != nil {
+		return 0, err
+	}
+	return res, nil
+}
+
 func (p *Parser) nextString(l int) (string, error) {
 	res := make([]byte, l)
 	err := binary.Read(p.reader, p.byteOrder, &res)
@@ -203,6 +258,15 @@ func (p *Parser) nextFloat32Slice(l int) ([]float32, error) {
 			return nil, err
 		}
 		res[i] = v
+	}
+	return res, nil
+}
+
+func (p *Parser) nextUint8Slice(l int) ([]uint8, error) {
+	res := make([]uint8, l)
+	err := binary.Read(p.reader, p.byteOrder, &res)
+	if err != nil {
+		return nil, err
 	}
 	return res, nil
 }
@@ -247,6 +311,14 @@ func (p *Parser) mustNextString(l int) string {
 	return res
 }
 
+func (p *Parser) mustNextFloat64() float64 {
+	res, err := p.nextFloat64()
+	if err != nil {
+		panic(err)
+	}
+	return res
+}
+
 // modifyString 将bytes转为string，并移除末尾的空字符
 func modifyString(bs []byte) string {
 	i := len(bs) - 1
@@ -257,4 +329,12 @@ func modifyString(bs []byte) string {
 		i--
 	}
 	return string(bs[:i+1])
+}
+
+func toIPStr(ip uint16) string {
+	bs := []byte(ipPrefix)
+	bs = append(bs, []byte(strconv.Itoa(int(ip>>8)))...)
+	bs = append(bs, '.')
+	bs = append(bs, []byte(strconv.Itoa(int(ip&(1<<8-1))))...)
+	return string(bs)
 }

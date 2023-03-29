@@ -9,3 +9,6 @@ const (
 	TimeCalibrationMap
 	EnergySpectrumData
 )
+
+// IP前缀
+const ipPrefix = "192.168."

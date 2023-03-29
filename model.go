@@ -7,6 +7,10 @@ type DataSet struct {
 	AcquisitionInfo *AcquisitionInfo
 	ImageInfo       *ImageInfo
 	DataInfo        *DataInfo
+	RawData         []RawDataItem
+	ListmodeData    []ListmodeDataItem
+	MichData        []uint16
+	ImageData       []float32
 }
 
 // PublicInfo 1.2.1 公共信息
@@ -88,8 +92,23 @@ type ImageInfo struct {
 	DelayCounts          uint32
 }
 
+// DataInfo 1.2.5 数据信息
 type DataInfo struct {
 	Length     uint32
 	DataLength uint32
 	CRC        uint16
+}
+
+type RawDataItem struct {
+	Data []uint8
+	IP   string
+}
+
+type ListmodeDataItem struct {
+	IP       string
+	XTalk    bool
+	Reserved uint8
+	Channel  uint16
+	Energy   float32
+	Time     float64
 }
